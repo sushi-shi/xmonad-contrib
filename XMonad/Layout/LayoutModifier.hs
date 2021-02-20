@@ -1,4 +1,7 @@
-{-# LANGUAGE DeriveDataTypeable, FlexibleInstances, MultiParamTypeClasses, PatternGuards #-}
+{-# LANGUAGE DeriveDataTypeable    #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE PatternGuards         #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -32,7 +35,8 @@ module XMonad.Layout.LayoutModifier (
 import Control.Monad
 
 import XMonad
-import XMonad.StackSet ( Stack, Workspace (..) )
+import XMonad.StackSet   (Stack, Workspace (..))
+import XMonad.Util.Types (These (..))
 
 -- $usage
 --
@@ -80,7 +84,6 @@ import XMonad.StackSet ( Stack, Workspace (..) )
 -- of the above examples; the documentation below is detailed but
 -- possibly confusing, and in many cases the creation of a
 -- 'LayoutModifier' is actually quite simple.
---
 -- /Important note/: because of the way the 'LayoutModifier' class is
 -- intended to be used, by overriding any of its methods and keeping
 -- default implementations for all the others, 'LayoutModifier'
@@ -90,6 +93,7 @@ import XMonad.StackSet ( Stack, Workspace (..) )
 -- the 'LayoutClass' instance for 'ModifiedLayout', since it is this
 -- instance that defines the semantics of overriding the various
 -- 'LayoutModifier' methods.
+
 
 class (Show (m a), Read (m a)) => LayoutModifier m a where
 
@@ -157,6 +161,16 @@ class (Show (m a), Read (m a)) => LayoutModifier m a where
     handleMessOrMaybeModifyIt :: m a -> SomeMessage -> X (Maybe (Either (m a) SomeMessage))
     handleMessOrMaybeModifyIt m mess = do mm' <- handleMess m mess
                                           return (Left <$> mm')
+
+    handleMessOrInterceptIt :: m a -> SomeMessage -> X (Maybe (These (m a) SomeMessage))
+    handleMessOrInterceptIt m mess = do mm' <- handleMessOrMaybeModifyIt m mess
+                                        case mm' of
+                                          Nothing -> pure Nothing
+                                          Just em ->
+                                              pure . pure $ case em of
+                                                Left nl     -> These nl mess
+                                                Right mess' -> That mess'
+
 
     -- | 'pureMess' allows you to spy on messages sent to the
     --   underlying layout, in order to possibly change the layout
@@ -246,7 +260,7 @@ class (Show (m a), Read (m a)) => LayoutModifier m a where
     modifyDescription :: (LayoutClass l a) => m a -> l a -> String
     modifyDescription m l = modifierDescription m <> description l
         where "" <> x = x
-              x <> y = x ++ " " ++ y
+              x <> y  = x ++ " " ++ y
 
 -- | The 'LayoutClass' instance for a 'ModifiedLayout' defines the
 --   semantics of a 'LayoutModifier' applied to an underlying layout.
@@ -260,13 +274,16 @@ instance (LayoutModifier m a, LayoutClass l a, Typeable m) => LayoutClass (Modif
            return (ws', ml'')
 
     handleMessage (ModifiedLayout m l) mess =
-        do mm' <- handleMessOrMaybeModifyIt m mess
+        do mm' <- handleMessOrInterceptIt m mess
            ml' <- case mm' of
-                  Just (Right mess') -> handleMessage l mess'
-                  _ -> handleMessage l mess
+                  Nothing              -> handleMessage l mess
+                  Just (This _)        -> pure . pure $ l
+                  Just (That mess')    -> handleMessage l mess'
+                  Just (These _ mess') -> handleMessage l mess'
            return $ case mm' of
-                    Just (Left m') -> Just $ (ModifiedLayout m') $ maybe l id ml'
-                    _ -> (ModifiedLayout m) <$> ml'
+                    Just (This m') -> Just $ ModifiedLayout m' $ maybe l id ml'
+                    Just (These m' _) -> Just $ ModifiedLayout m' $ maybe l id ml'
+                    _ -> ModifiedLayout m <$> ml'
     description (ModifiedLayout m l) = modifyDescription m l
 
 -- | A 'ModifiedLayout' is simply a container for a layout modifier
@@ -277,4 +294,5 @@ data ModifiedLayout m l a = ModifiedLayout (m a) (l a) deriving ( Read, Show )
 -- N.B. I think there is a Haddock bug here; the Haddock output for
 -- the above does not parenthesize (m a) and (l a), which is obviously
 -- incorrect.
+
 

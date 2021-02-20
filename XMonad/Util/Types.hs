@@ -15,6 +15,7 @@
 
 module XMonad.Util.Types (Direction1D(..)
                          ,Direction2D(..)
+                         ,These(..)
                          ) where
 
 import Data.Typeable (Typeable)
@@ -28,3 +29,5 @@ data Direction2D = U -- ^ Up
                  | R -- ^ Right
                  | L -- ^ Left
                    deriving (Eq,Read,Show,Ord,Enum,Bounded,Typeable)
+
+data These a b = This a | That b | These a b
